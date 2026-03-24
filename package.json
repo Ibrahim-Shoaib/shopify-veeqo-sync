@@ -1,7 +1,7 @@
 {
   "name": "shopify-veeqo-sync",
-  "version": "1.0.0",
-  "description": "Syncs Shopify order edits (AfterSell upsells) to Veeqo automatically",
+  "version": "2.0.0",
+  "description": "Syncs AfterSell post-purchase upsells from Shopify orders to Veeqo",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
