@@ -42,7 +42,6 @@ const app = express();
 const VEEQO_API_KEY           = process.env.VEEQO_API_KEY;
 const SHOPIFY_WEBHOOK_SECRET  = process.env.SHOPIFY_WEBHOOK_SECRET;
 const PORT                    = process.env.PORT || 3000;
-const AFTERSELL_WINDOW_MIN    = Number(process.env.AFTERSELL_WINDOW_MINUTES ?? 30);
 const VEEQO_PREFIX            = process.env.VEEQO_ORDER_PREFIX ?? "LL";
 
 if (!VEEQO_API_KEY) {
@@ -113,23 +112,13 @@ app.post("/webhook/order-updated", async (req, res) => {
     return;
   }
 
-  // ── FILTER 2: Must be within the AfterSell upsell window ─────────────────
-  // AfterSell presents its post-purchase offer immediately after checkout and
-  // the customer must act on it quickly. An edit arriving hours later is almost
-  // certainly not an AfterSell upsell.
-  const gapMinutes = gapSeconds / 60;
-  if (gapMinutes > AFTERSELL_WINDOW_MIN) {
-    console.log(`    ⏭️  Skipped: update is ${gapMinutes.toFixed(1)} min after creation (window is ${AFTERSELL_WINDOW_MIN} min) — not an AfterSell upsell`);
-    return;
-  }
-
-  console.log(`    ✅  Within AfterSell window (${gapMinutes.toFixed(1)} min after creation)`);
+  console.log(`    ✅  Order was updated ${(gapSeconds / 60).toFixed(1)} min after creation — proceeding`);
 
   try {
     // ── Find Veeqo order ──────────────────────────────────────────────────
     const veeqoOrder = await findVeeqoOrder(shopifyOrderNumber);
     if (!veeqoOrder) {
-      console.error(`    ❌  Could not find Veeqo order for Shopify order ${displayNumber} (searched as ${VEEQO_PREFIX}${shopifyOrderNumber})`);
+      console.error(`    ❌  Could not find Veeqo order for Shopify order ${displayNumber} (searched as #${VEEQO_PREFIX}${shopifyOrderNumber})`);
       return;
     }
     console.log(`    🔍  Found Veeqo order ID ${veeqoOrder.id} (number: ${veeqoOrder.number})`);
@@ -265,24 +254,29 @@ function lineItemsChanged(shopifyItems, veeqoItems) {
  * "#1234") in case the store prefix differs.
  */
 async function findVeeqoOrder(shopifyOrderNumber) {
-  const numStr          = String(shopifyOrderNumber).replace("#", "");
-  const veeqoNumber     = `${VEEQO_PREFIX}${numStr}`;   // e.g. "LL1234"
-  const shopifyName     = `#${numStr}`;                  // e.g. "#1234"
+  const numStr      = String(shopifyOrderNumber).replace("#", "");
+  const veeqoNumber = `#${VEEQO_PREFIX}${numStr}`;   // e.g. "#LL7091"
 
-  console.log(`    🔎  Searching Veeqo for order "${veeqoNumber}" (channel ref "${shopifyName}")`);
+  console.log(`    🔎  Searching Veeqo for order "${veeqoNumber}"`);
 
-  // The Veeqo query param is a free-text search across number + channel ref
+  // Send the full "#LL7091" form as the search query
   const results = await veeqoGet(`/orders?query=${encodeURIComponent(veeqoNumber)}`);
 
   if (!Array.isArray(results)) return null;
 
-  // Try exact match on Veeqo number first (most reliable)
+  // Exact match on Veeqo number field: "#LL7091"
   let match = results.find(o =>
-    String(o.number  || "").trim() === veeqoNumber ||
-    String(o.number  || "").trim() === numStr
+    String(o.number || "").trim() === veeqoNumber
   );
 
-  // Fall back: match on channel_order_number (Shopify stores "#1234" here)
+  // Fallback: without leading "#" → "LL7091"
+  if (!match) {
+    match = results.find(o =>
+      String(o.number || "").replace("#", "").trim() === `${VEEQO_PREFIX}${numStr}`
+    );
+  }
+
+  // Last resort: channel_order_number holds Shopify's "#7091"
   if (!match) {
     match = results.find(o =>
       String(o.channel_order_number || "").replace("#", "") === numStr
@@ -352,7 +346,6 @@ async function veeqoGet(path) {
 // ─── Start ────────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`🚀  AfterSell→Veeqo sync server running on port ${PORT}`);
-  console.log(`    AfterSell window : ${AFTERSELL_WINDOW_MIN} minutes`);
-  console.log(`    Veeqo prefix     : ${VEEQO_PREFIX}`);
-  console.log(`    HMAC check       : ${SHOPIFY_WEBHOOK_SECRET ? "enabled ✅" : "DISABLED ⚠️  (set SHOPIFY_WEBHOOK_SECRET)"}`);
+  console.log(`    Veeqo prefix : ${VEEQO_PREFIX} (searches as e.g. #${VEEQO_PREFIX}7091)`);
+  console.log(`    HMAC check   : ${SHOPIFY_WEBHOOK_SECRET ? "enabled ✅" : "DISABLED ⚠️  (set SHOPIFY_WEBHOOK_SECRET)"}`);
 });
