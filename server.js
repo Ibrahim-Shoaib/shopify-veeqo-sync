@@ -161,10 +161,12 @@ function verifyShopifyHmac(req) {
 // Uses Veeqo's query parameter to search by order number directly,
 // instead of scanning through the first 50 results which misses older orders.
 async function findVeeqoOrder(shopifyOrderNumber) {
+  // Remove the # from the order number (e.g. #1001 -> 1001)
   const number = String(shopifyOrderNumber).replace("#", "");
 
-  // Search by order number directly — works for orders of any age
-  const results = await veeqoGet(`/orders?status=all&query=${encodeURIComponent(number)}`);
+  // FIX: Removed 'status=all' because Veeqo does not support it.
+  // This query will now search across all statuses by default.
+  const results = await veeqoGet(`/orders?query=${encodeURIComponent(number)}`);
 
   const match = results.find(
     (o) =>
